@@ -1,244 +1,40 @@
-# TaskBridge — Database Schema & Security
+# TaskBridge — Database Schema
 
-## 1. الهدف من الملف
+## 1. Overview
 
-يوضح هذا الملف تصميم قاعدة البيانات المتوقع لتطبيق TaskBridge، بما يشمل:
+This document describes the proposed database structure for TaskBridge, an AI-powered application that transforms unclear requests into structured and actionable plans.
 
-- الجداول والحقول.
-- العلاقات بين الجداول.
-- قيود البيانات.
-- ملكية السجلات.
-- سياسات Row Level Security (RLS).
-- طريقة حساب نسبة الإنجاز.
+The database is designed to store user accounts, submitted requests, clarification details, and generated action plans when these features are implemented.
 
-الهدف هو فهم بنية النظام والتحقق من التنفيذ، وليس مجرد إنشاء واجهة تعمل ظاهريًا.
+**Important:** This is a proposed schema. It must be checked against the actual application and existing Supabase database before any SQL is executed.
 
-> راجعي قاعدة البيانات الحالية قبل تشغيل أي SQL. لا تشغّلي أوامر إنشاء أو حذف عشوائيًا على مشروع يحتوي على بيانات مهمة.
+## 2. Database Technology
 
----
+- Database: PostgreSQL
+- Backend platform: Supabase
+- Authentication: Supabase Auth
+- Data protection: Row Level Security (RLS)
 
-## 2. جدول plans
+## 3. Proposed Tables
 
-يخزن هذا الجدول الخطط التي ينشئها المستخدمون.
+The proposed schema contains the following tables:
 
-| Field | Type | Required | Purpose |
-|---|---|---|---|
-| `id` | UUID | Yes | معرّف الخطة |
-| `user_id` | UUID | Yes | معرّف المستخدم المالك |
-| `title` | Text | Yes | عنوان الخطة |
-| `description` | Text | Yes | وصف الخطة |
-| `goal` | Text | Yes | الهدف أو النتيجة المطلوبة |
-| `deadline` | Date | No | الموعد النهائي |
-| `deliverables` | JSONB | Yes | قائمة المخرجات، افتراضيًا `[]` |
-| `next_step` | Text | No | الخطوة التالية |
-| `created_at` | Timestamptz | Yes | وقت الإنشاء |
-| `updated_at` | Timestamptz | Yes | وقت آخر تحديث |
+1. `profiles` — optional user profile information.
+2. `requests` — requests submitted by users.
+3. `clarification_questions` — questions created to clarify incomplete requests.
+4. `action_plans` — structured plans generated from requests.
+5. `action_plan_tasks` — individual tasks belonging to an action plan.
 
-### ملاحظات
+The final implementation may use fewer tables if the application does not require all these features.
 
-- يجب أن يكون `id` هو المفتاح الأساسي (Primary Key).
-- يجب أن يشير `user_id` إلى المستخدم في `auth.users`.
-- يجب أن تكون `deliverables` قائمة فارغة افتراضيًا.
-- يمكن ترك `deadline` و`next_step` فارغين.
-- يجب تحديث `updated_at` عند تعديل الخطة.
+## 4. Table Definitions
 
----
+### 4.1 Profiles
 
-## 3. جدول plan_tasks
+Stores optional profile information associated with an authenticated user.
 
-يخزن المهام المرتبطة بالخطط.
-
-| Field | Type | Required | Purpose |
-|---|---|---|---|
-| `id` | UUID | Yes | معرّف المهمة |
-| `plan_id` | UUID | Yes | الخطة المرتبطة |
-| `user_id` | UUID | Yes | المستخدم المالك |
-| `title` | Text | Yes | عنوان المهمة |
-| `description` | Text | No | وصف المهمة |
-| `priority` | Text | Yes | أولوية المهمة |
-| `status` | Text | Yes | حالة المهمة |
-| `sort_order` | Integer | Yes | ترتيب العرض |
-| `created_at` | Timestamptz | Yes | وقت الإنشاء |
-
-### القيم المسموحة
-
-Priority:
-
-- `High`
-- `Medium`
-- `Low`
-
-Status:
-
-- `To Do`
-- `In Progress`
-- `Done`
-
-يجب استخدام قيود في قاعدة البيانات لمنع حفظ قيم أخرى غير مسموحة.
-
----
-
-## 4. العلاقة بين الجداول
-
-العلاقة بين `plans` و`plan_tasks` هي:
-
-**One-to-Many**
-
-أي أن الخطة الواحدة يمكن أن تحتوي على عدة مهام، بينما تنتمي كل مهمة إلى خطة واحدة.
-
-### مثال
-
-```text
-User
-  |
-  └── Plan A
-        |
-        ├── Task 1
-        ├── Task 2
-        └── Task 3
-```
-
-يجب أن تكون كل خطة مرتبطة بمستخدم واحد.
-
-ويجب أن تكون كل مهمة مرتبطة بمستخدم وخطة يملكها المستخدم نفسه.
-
-### Referential Integrity
-
-يجب أن تمنع قاعدة البيانات إنشاء مهمة مرتبطة بخطة غير موجودة أو بخطة يملكها مستخدم آخر.
-
-يُفضّل فرض هذا الشرط من خلال مفتاح خارجي مركب يربط:
-
-`plan_tasks(plan_id, user_id)`
-
-بـ:
-
-`plans(id, user_id)`
-
-ويجب تعريف قيد فريد مناسب على `(id, user_id)` في جدول `plans` لدعم هذه العلاقة.
-
-### حذف الخطة
-
-عند حذف خطة، يجب حذف المهام التابعة لها باستخدام:
-
-`ON DELETE CASCADE`
-
----
-
-## 5. Row Level Security (RLS)
-
-تُستخدم RLS لتحديد السجلات التي يستطيع المستخدم الوصول إليها على مستوى قاعدة البيانات.
-
-تفعيل RLS وحده لا يكفي؛ يجب إعداد السياسات المناسبة واختبارها.
-
-### سياسات جدول plans
-
-#### SELECT
-يسمح للمستخدم بقراءة الخطط التي يملكها فقط.
-
-#### INSERT
-يسمح للمستخدم بإنشاء خطة إذا كان `user_id` يساوي `auth.uid()`.
-
-#### UPDATE
-يسمح للمستخدم بتعديل خططه فقط، مع ضمان عدم تغيير ملكية السجل إلى مستخدم آخر.
-
-#### DELETE
-يسمح للمستخدم بحذف خططه فقط.
-
-### سياسات جدول plan_tasks
-
-#### SELECT
-يسمح للمستخدم بقراءة المهام التي يملكها فقط.
-
-#### INSERT
-يسمح بإنشاء المهمة إذا:
-- كان `user_id` يساوي `auth.uid()`.
-- كانت الخطة المرتبطة مملوكة للمستخدم نفسه.
-
-#### UPDATE
-يسمح بتعديل المهام التي يملكها المستخدم، مع منع نقل المهمة إلى خطة يملكها مستخدم آخر.
-
-#### DELETE
-يسمح للمستخدم بحذف مهامه فقط.
-
-### مبدأ أمني مهم
-
-لا تعتمدي على إخفاء البيانات في الواجهة الأمامية (Frontend) باعتباره حماية.
-
-يجب أن تفرض قاعدة البيانات الصلاحيات المطلوبة حتى لو حاول شخص إرسال طلب مباشر أو تعديل معرّف السجل.
-
----
-
-## 6. Authentication vs Authorization
-
-### Authentication
-
-التحقق من هوية المستخدم.
-
-مثال: تسجيل الدخول إلى TaskBridge.
-
-### Authorization
-
-التحقق من العمليات والبيانات التي يُسمح للمستخدم بالوصول إليها.
-
-مثال: السماح للمستخدم بتعديل خططه فقط، ومنعه من تعديل خطط مستخدم آخر.
-
-كلا المفهومين ضروري لبناء تطبيق آمن.
-
----
-
-## 7. Persistence
-
-يجب أن تُحفظ الخطط والمهام في قاعدة البيانات، لا في حالة الواجهة فقط.
-
-يجب أن تبقى البيانات متاحة للمستخدم بعد:
-- تحديث الصفحة.
-- إغلاق المتصفح والعودة لاحقًا.
-- تسجيل الخروج ثم تسجيل الدخول مجددًا.
-
-يجب اختبار ذلك فعليًا.
-
----
-
-## 8. حساب Progress
-
-تحسب نسبة الإنجاز من عدد المهام المكتملة مقارنة بإجمالي المهام.
-
-```text
-Progress = (Completed Tasks / Total Tasks) × 100
-```
-
-مثال:
-
-إذا كانت الخطة تحتوي على أربع مهام، وكانت مهمة واحدة فقط بحالة `Done`:
-
-```text
-Progress = (1 / 4) × 100 = 25%
-```
-
-إذا لم توجد مهام، تكون النسبة `0%`.
-
-يفضل حساب النسبة من حالات المهام الحالية بدلًا من حفظ قيمة مستقلة قد تصبح غير متوافقة مع البيانات.
-
----
-
-## 9. فحص قاعدة البيانات بعد البناء
-
-بعد أن ينفذ Lovable التطبيق، راجعي التالي في Supabase:
-
-- [ ] وجود جدول `plans`.
-- [ ] وجود جدول `plan_tasks`.
-- [ ] صحة أسماء الحقول وأنواعها.
-- [ ] وجود المفاتيح الأساسية.
-- [ ] صحة العلاقات بين الجداول.
-- [ ] وجود القيود الخاصة بـ Priority وStatus.
-- [ ] وجود العلاقة التي تمنع ربط المهمة بخطة مستخدم آخر.
-- [ ] تفعيل RLS على الجدولين.
-- [ ] وجود سياسات SELECT وINSERT وUPDATE وDELETE.
-- [ ] عدم وجود مفاتيح سرية داخل كود الواجهة.
-- [ ] اختبار الوصول باستخدام حسابين مختلفين.
-
-## 10. ملاحظة تنفيذية
-
-هذا الملف يحدد **المخطط المتوقع ومتطلبات الأمان**، ولا يثبت أن هذه العناصر أُنشئت فعلًا في Supabase.
-
-يجب مراجعة التنفيذ الفعلي واختباره قبل اعتبار التطبيق جاهزًا للاستخدام.
+| Column | Type | Description |
+|---|---|---|
+| `id` | UUID | Primary key; references `auth.users.id` |
+| `display_name` | TEXT | Optional display name |
+| `created
